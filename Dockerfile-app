@@ -1,0 +1,45 @@
+FROM tigapilarmandiri/oracle-golang:latest as builder 
+
+WORKDIR /app
+COPY .env main.go go.mod /app/
+
+# Download dependencies
+RUN go mod tidy -v
+
+# Build binary
+RUN go build -o api main.go
+
+# Remove Go toolchain (optional cleanup in builder)
+RUN rm -rf /usr/local/go
+
+# Remove build dependencies
+RUN apt remove -y build-essential \
+    && apt autoremove -y && apt purge -y
+
+
+# ------------------- Runtime stage -------------------
+FROM tigapilarmandiri/oracle-golang:latest
+
+WORKDIR /app
+
+# Remove Go toolchain (only keep runtime + Oracle client)
+RUN rm -rf /usr/local/go \
+    && apt remove -y build-essential \
+    && apt autoremove -y && apt purge -y \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user with fixed UID/GID = 1001
+RUN groupadd -g 1001 appgroup \
+    && useradd -u 1001 -g 1001 -M -s /bin/bash appuser
+
+# Copy binary and env file with correct ownership
+COPY --chown=1001:1001 --from=builder /app/api /app/api
+COPY --chown=1001:1001 --from=builder /app/.env /app/.env
+
+# Switch to non-root user
+USER 1001
+
+# Expose port (adjust if needed)
+EXPOSE 8080
+
+CMD ["./api"]
